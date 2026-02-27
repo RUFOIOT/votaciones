@@ -1,0 +1,150 @@
+
+# Instrucciones Completas: Página de Votación en Vivo para Demo Week (Netlify + Google Sheets)
+
+Este documento te guiará paso a paso para configurar tu sistema de votación en vivo, utilizando una página HTML (frontend) alojada en Netlify y un script de Google Apps Script (backend simple) para registrar los votos en una Google Sheet.
+
+---
+
+## 1. Configuración de la Google Sheet (Base de Datos de Votos)
+
+Primero, necesitamos una hoja de cálculo donde se almacenarán los votos de los jueces.
+
+1.  **Crea una nueva Google Sheet:** Ve a `sheets.new` en tu navegador.
+2.  **Nombra la hoja:** Ponle un nombre claro, por ejemplo: `Votos Demo Week Finalistas`.
+3.  **Configura los encabezados de las columnas:** En la primera fila (A1, B1, C1, etc.), copia y pega los siguientes encabezados exactamente como están. ¡Es crucial que coincidan para que el script funcione!
+
+    ```
+    Marca temporal,Nombre del Juez,Nombre del Proyecto,C1,C2,C3,C4,Instinto,Comentarios
+    ```
+
+    *   `Marca temporal`: El script registrará automáticamente la fecha y hora del voto.
+    *   `Nombre del Juez`: Nombre del juez que emite el voto.
+    *   `Nombre del Proyecto`: El emprendimiento votado.
+    *   `C1`, `C2`, `C3`, `C4`: Las puntuaciones de los criterios esenciales (1-5).
+    *   `Instinto`: La puntuación del factor 'Tie-Breaker' (1-10).
+    *   `Comentarios`: Las notas y banderas rojas del juez.
+
+---
+
+## 2. Creación y Despliegue del Google Apps Script (GAS) como Web App (Backend)
+
+Este script actuará como un "servidor" simple que recibirá los votos de tu página web y los escribirá en la Google Sheet.
+
+1.  **Abre el Editor de Apps Script:** En tu Google Sheet (`Votos Demo Week Finalistas`), ve a `Extensiones > Apps Script`. Se abrirá una nueva pestaña con el editor de código.
+2.  **Copia y Pega el Código:** Borra cualquier código que esté por defecto (`function myFunction() { ... }`) y copia y pega el siguiente código completo en el editor.
+
+    ```javascript
+    const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE'; // *** REEMPLAZA ESTO ***
+    const SHEET_NAME = 'Hoja 1'; // Asegúrate que este sea el nombre de tu hoja de votos, si lo cambiaste, actualízalo aquí.
+
+    function doGet(e) {
+      // Manejar solicitudes GET, principalmente para pruebas o evitar errores.
+      return ContentService.createTextOutput("Acceso GET recibido. Por favor, envía votos vía POST.");
+    }
+
+    function doPost(e) {
+      const lock = LockService.getScriptLock();
+      lock.waitLock(30000); // Esperar hasta 30 segundos para obtener el bloqueo
+
+      try {
+        const doc = SpreadsheetApp.openById(SPREADSHEET_ID);
+        const sheet = doc.getSheetByName(SHEET_NAME);
+
+        if (!sheet) {
+          throw new Error('La hoja con el nombre especificado no fue encontrada.');
+        }
+
+        const data = JSON.parse(e.postData.contents);
+
+        // Nombres de los encabezados de la Google Sheet, deben coincidir exactamente
+        const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+        const row = [];
+
+        // Asegurarse de que el orden de los datos coincida con los encabezados
+        // y manejar posibles errores si un campo falta
+        row.push(new Date()); // Marca temporal automática
+
+        row.push(data.judgeName || '');
+        row.push(data.projectName || '');
+        row.push(data.c1 || '');
+        row.push(data.c2 || '');
+        row.push(data.c3 || '');
+        row.push(data.c4 || '');
+        row.push(data.instinct || '');
+        row.push(data.comments || '');
+
+        sheet.appendRow(row);
+
+        return ContentService.createTextOutput(JSON.stringify({ success: true, message: 'Voto registrado con éxito.' }))
+               .setMimeType(ContentService.MimeType.JSON);
+
+      } catch (error) {
+        return ContentService.createTextOutput(JSON.stringify({ success: false, message: 'Error al registrar el voto: ' + error.message }))
+               .setMimeType(ContentService.MimeType.JSON);
+      } finally {
+        lock.releaseLock();
+      }
+    }
+    ```
+
+3.  **Obtén el ID de tu Google Sheet:**
+    *   Vuelve a tu Google Sheet (`Votos Demo Week Finalistas`).
+    *   El ID de la hoja de cálculo se encuentra en la URL. Es la cadena de caracteres entre `/d/` y `/edit`.
+    *   Ejemplo de URL: `https://docs.google.com/spreadsheets/d/1ABC2DEF3GHI4JKL5MNO6PQR7STU8VWX9YZ/edit#gid=0`
+    *   El `SPREADSHEET_ID` sería: `1ABC2DEF3GHI4JKL5MNO6PQR7STU8VWX9YZ`
+4.  **Reemplaza `YOUR_SPREADSHEET_ID_HERE`:** En el código de Apps Script, busca la línea `const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';` y reemplaza `'YOUR_SPREADSHEET_ID_HERE'` con el ID real de tu Google Sheet.
+5.  **Guarda el Proyecto:** Haz clic en el icono de disquete (Guardar proyecto) o ve a `Archivo > Guardar proyecto`. Nómbralo, por ejemplo, `VotacionDemoWeekScript`.
+6.  **Despliega el Script como Aplicación Web:**
+    *   Ve a `Desplegar > Nueva implementación`.
+    *   Haz clic en el icono de "Tipo de implementación" (normalmente una rueda dentada) y selecciona **"Aplicación web"**.
+    *   **Configura:**
+        *   **Descripción:** `Votación Demo Week Backend` (o similar).
+        *   **Ejecutar como:** `Yo` (tu dirección de correo).
+        *   **Quién tiene acceso:** `Cualquier usuario` (¡CRÍTICO para que tu página web pueda enviar datos!).
+    *   Haz clic en `Desplegar`.
+    *   La primera vez, se te pedirá que **Autorices la implementación**. Sigue los pasos:
+        *   Haz clic en `Autorizar acceso`.
+        *   Selecciona tu cuenta de Google.
+        *   Haz clic en `Avanzado` y luego en `Ir a VotacionDemoWeekScript (no seguro)`.
+        *   Revisa los permisos y haz clic en `Permitir`.
+    *   Después de la autorización, se te proporcionará una **"URL de la aplicación web"**. **Copia esta URL; la necesitarás para tu página HTML.** (Se verá algo como: `https://script.google.com/macros/s/AKfyc.../exec`)
+
+---
+
+## 3. Conexión de la Página HTML con el Google Apps Script (Frontend)
+
+Ahora, necesitamos que tu página HTML (que alojarás en Netlify) sepa dónde enviar los votos.
+
+1.  **Abre el archivo `pagina_votacion_demo_week.html`** que te he generado (está en `/Users/felipesalgado/Desktop/innovacion/SALUD_SA_Reporte/`).
+2.  **Edita la línea `const GOOGLE_APPS_SCRIPT_URL = 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE';`** en la sección `<script>` al final del archivo.
+3.  **Reemplaza `'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE'` con la "URL de la aplicación web" que obtuviste en el paso 2.6.**
+
+    ```javascript
+    // Reemplaza con la URL de tu Google Apps Script Web App
+    const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfyc.../exec'; // ¡TU URL AQUI!
+    ```
+4.  **Guarda el archivo HTML.**
+
+---
+
+## 4. Despliegue de la Página HTML en Netlify
+
+Ahora que tu frontend sabe dónde enviar los votos, puedes subirlo a Netlify.
+
+1.  **Sube tu archivo `pagina_votacion_demo_week.html`** a tu sitio de Netlify.
+2.  Asegúrate de que el archivo esté en la raíz del directorio de tu sitio o en una subcarpeta accesible. Netlify se encargará del resto.
+
+---
+
+## 5. Pruebas y Consideraciones Adicionales
+
+*   **Prueba a Fondo:** Abre tu página de Netlify, llena el formulario y haz clic en "Enviar Voto". Verifica que los datos aparezcan en tu Google Sheet.
+*   **Seguridad:** Para una Demo Week, este método es funcional. Para aplicaciones de producción o con datos sensibles, se recomendarían capas de seguridad adicionales (validación más robusta, autenticación de usuarios, etc.).
+*   **Mensajes de Éxito/Error:** El script HTML ya tiene mensajes básicos. Puedes mejorarlos si lo necesitas.
+*   **Proyectos en el `select`:** La lista de proyectos en el HTML (`<select id="projectName">`) es de ejemplo. Deberás actualizarla con los nombres exactos de los finalistas de tu Demo Week.
+
+---
+
+Con esto, tienes todos los componentes y las instrucciones para crear tu sistema de votación en vivo.
+
+**¡Te avisaré cuando el archivo `instrucciones_votacion_demo_week.txt` esté guardado en tu escritorio!**
